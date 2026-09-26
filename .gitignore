@@ -24,3 +24,6 @@ vs_Community.exe
 !.vscode/extensions.json
 art/build_html.bat
 art/build_html-debug.bat
+
+### Android signing
+key.keystore

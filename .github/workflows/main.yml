@@ -1,111 +1,118 @@
-name: Build
+name: Build Android
 
 on:
   push:
-    branches: [ main, experimental ]
+    branches: [ mod, main ]
   pull_request:
-    branches: [ main, experimental ]
+    branches: [ mod, main ]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag for the GitHub Release (leave empty to skip the release)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
 
 jobs:
-  buildLinux:
+  buildAndroid:
     runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v4.3.0
 
-      - uses: krdlab/setup-haxe@master
+    env:
+      ANDROID_PLATFORM: android-36
+      ANDROID_BUILD_TOOLS: 36.0.0
+      ANDROID_NDK_VERSION: 29.0.14206865
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
-          haxe-version: 4.3.7
-      - name: Restore Build cache
-        uses: actions/cache@v4
-        with:
-          key: cacheLinux
-          path: |
-            export/release/linux/haxe/
-            export/release/linux/obj/
-          restore-keys: |
-            cacheLinux
-      - name: Install Haxelib
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android platform, build-tools and NDK
         run: |
-          sudo apt-get install libvlc-dev
-          sudo apt-get install libvlccore-dev
-          haxelib setup ~/haxelib
-          haxelib install hxcpp > /dev/null --quiet
-          chmod +x ./setup/unix.sh
-          sh ./setup/unix.sh
-      - name: Create Version Tag
-        run: echo "${{github.run_id}}" > VERSION
-      - name: Compile
-        run: haxelib run lime build Project.xml linux --app-version="4.0.0-${{ github.run_id}}" -D officialBuild
-      - name: Publish Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: linuxBuild
-          path: export/release/linux/bin
-  buildWindows:
-    runs-on: windows-latest
+          sdkmanager --install "platforms;$ANDROID_PLATFORM" "build-tools;$ANDROID_BUILD_TOOLS" "ndk;$ANDROID_NDK_VERSION"
 
-    steps:
-      - uses: actions/checkout@v4.3.0
+      - name: Setup Haxe
+        uses: krdlab/setup-haxe@master
+        with:
+          haxe-version: 4.3.6
 
-      - uses: krdlab/setup-haxe@master
-        with:
-          haxe-version: 4.3.7
-      - name: Restore Build cache
-        uses: actions/cache@v4
-        with:
-          key: cacheWindows
-          path: |
-            export/release/windows/haxe/
-            export/release/windows/obj/
-          restore-keys: |
-            cacheWindows
-      - name: Install Haxelib
+      - name: Install system dependencies
         run: |
-          haxelib setup C:/haxelib
-          haxelib install hxcpp > /dev/null --quiet
-          .\"setup/windows.bat"
-        shell: cmd
-      - name: Create Version Tag
-        run: echo "${{github.run_id}}" > VERSION
-      - name: Compile
-        run: haxelib run lime build windows --app-version="4.0.0-${{ github.run_id}}"  -D officialBuild
-      - name: Publish Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windowsBuild
-          path: export/release/windows/bin
-  buildMac:
-    runs-on: macos-15
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build libvlc-dev libvlccore-dev vlc
 
-    steps:
-      - uses: actions/checkout@v4.3.0
+      - name: Clean haxelib folder
+        run: rm -rf ~/haxelib
 
-      - uses: krdlab/setup-haxe@master
-        with:
-          haxe-version: 4.3.7
-      - name: Restore Build cache
-        uses: actions/cache@v4
-        with:
-          key: cacheMac
-          path: |
-            export/release/macos/haxe/
-            export/release/macos/obj/
-          restore-keys: |
-            cacheMac
-      - name: Install Haxelib
+      - name: Install Haxe dependencies
         run: |
           haxelib setup ~/haxelib
           haxelib install hxcpp > /dev/null --quiet
           chmod +x ./setup/unix.sh
           sh ./setup/unix.sh
-      - name: Create Version Tag
-        run: echo "${{github.run_id}}" > VERSION
+
+      - name: Configure Android SDK/NDK paths
+        run: |
+          echo "ANDROID_SDK=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> $GITHUB_ENV
+          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
+
+      - name: Setup lime for Android
+        run: |
+          haxelib run lime config ANDROID_SDK "$ANDROID_SDK_ROOT"
+          haxelib run lime config ANDROID_NDK_ROOT "$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+          haxelib run lime config JAVA_HOME "$JAVA_HOME"
+          haxelib run lime config ANDROID_SETUP true
+
+      - name: Generate placeholder keystore if missing
+        run: |
+          if [ ! -f key.keystore ]; then
+            keytool -genkeypair -noprompt \
+              -keystore key.keystore \
+              -storepass KEYSTORE_PASSWORD \
+              -alias KEYSTORE_ALIAS \
+              -keypass KEYSTORE_ALIAS_PASSWORD \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=PsychEngineMint, OU=None, O=None, L=None, S=None, C=US"
+          fi
+
       - name: Compile
-        run: haxelib run lime build mac --app-version="4.0.0-${{ github.run_id}}"  -D officialBuild
+        run: haxelib run lime build Project.xml android -D officialBuild
+
+      - name: Locate APK
+        id: apk
+        run: |
+          APK=$(find export -name "*.apk" | head -n 1)
+          if [ -z "$APK" ]; then
+            echo "No APK found under export/"
+            find export -maxdepth 4 -type d || true
+            exit 1
+          fi
+          echo "Found APK: $APK"
+          echo "path=$APK" >> $GITHUB_OUTPUT
+
       - name: Publish Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macBuild
-          path: export/release/macos/bin
+          name: androidBuild
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Create Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: ${{ inputs.version }}
+          files: ${{ steps.apk.outputs.path }}
