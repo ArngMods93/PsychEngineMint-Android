@@ -81,6 +81,7 @@ jobs:
           if [ ! -f key.keystore ]; then
             keytool -genkeypair -noprompt \
               -keystore key.keystore \
+              -storetype JKS \
               -storepass KEYSTORE_PASSWORD \
               -alias KEYSTORE_ALIAS \
               -keypass KEYSTORE_ALIAS_PASSWORD \

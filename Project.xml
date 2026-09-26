@@ -65,6 +65,18 @@
 
 		<config:android minimum-sdk-version="24" target-sdk-version="36" build-tools-version="36.0.0" />
 
+		<!-- 64 bit only: NDK r29 no longer ships the API levels hxcpp uses for 32 bit targets -->
+		<architecture name="ARM64" />
+		<architecture exclude="ARMV7" />
+		<architecture exclude="X86" />
+		<architecture exclude="X86_64" />
+
+		<!-- hxcpp only detects the host from the legacy NDK layout, which r29 removed -->
+		<setenv name="ANDROID_HOST" value="linux-x86_64" unless="windows" />
+		<setenv name="ANDROID_HOST" value="windows-x86_64" if="windows" />
+		<!-- the ${EXEPREFIX}-strip binutils wrappers are gone since NDK r23 -->
+		<setenv name="HXCPP_STRIP" value="llvm-strip" />
+
 		<android permission="android.permission.INTERNET" />
 		<android permission="android.permission.ACCESS_NETWORK_STATE" />
 		<android permission="android.permission.ACCESS_WIFI_STATE" />
